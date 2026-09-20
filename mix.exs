@@ -111,6 +111,7 @@ defmodule TypeSafeAPISDK.MixProject do
         {"guides/models.md", title: "Models API"},
         {"guides/errors-and-retries.md", title: "Errors and Retries"},
         {"guides/runtime-controls.md", title: "Runtime Controls"},
+        {"guides/live-verification.md", title: "Live Verification"},
         {"guides/extraction-boundary.md", title: "Extraction Boundary"},
         {"guides/generation-and-verification.md", title: "Generation and Verification"},
         {"docs/implementation/0.1.0/README.md",
@@ -129,7 +130,8 @@ defmodule TypeSafeAPISDK.MixProject do
           "guides/system-one-and-questions.md",
           "guides/models.md",
           "guides/errors-and-retries.md",
-          "guides/runtime-controls.md"
+          "guides/runtime-controls.md",
+          "guides/live-verification.md"
         ],
         Architecture: [
           "guides/extraction-boundary.md",

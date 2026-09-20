@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Verification
+
+- Expanded real-service verification to cover both TypeSafe operations, Noul,
+  Choice, Score, tuple and bang APIs, explicit/default client configuration,
+  concrete model selection, response metadata, and safe per-call controls.
+- Added a separately credentialed alternate-deployment live matrix for arbitrary
+  TypeSafe-compatible base URLs, including path-prefixed deployments.
+- Added deterministic runtime-control coverage for protected per-call headers,
+  pre-cancelled Pristine tokens, an actual `529 -> 200` retry sequence, and
+  fail-closed runtime capability reporting.
+- Added `scripts/live_qc.sh`, `examples/live_matrix.exs`, and a complete live
+  verification guide.
+
+
 All notable changes to this project will be documented in this file.
 
 ## [0.1.0] - 2026-09-19

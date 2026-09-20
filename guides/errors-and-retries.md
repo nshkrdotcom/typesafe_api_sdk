@@ -23,3 +23,12 @@ TypeSafeAPISDK.system_one(client, state, questions,
 
 Use `retry: false` to disable retries for a client or one call. Pristine executes
 the retries; this package only supplies the TypeSafe provider policy.
+
+
+## Retry verification
+
+The normal test suite includes a controlled retryable `529 -> 200` sequence through
+the same SDK -> Pristine execution path and asserts that exactly two attempts occur
+when `max_retries: 1`. The real-service suite uses explicit retry configuration on
+successful requests but does not intentionally provoke production 429/5xx errors.
+This avoids turning a release check into provider abuse or a flaky test.

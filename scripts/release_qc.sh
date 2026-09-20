@@ -7,11 +7,13 @@ PACKAGE_DIR="typesafe_api_sdk-${VERSION}"
 
 usage() {
   cat <<'TXT'
-Usage: bash scripts/release_qc.sh <offline|package-dry-run|live>
+Usage: bash scripts/release_qc.sh <offline|package-dry-run|live|live-alt|live-matrix>
 
   offline          Run the full non-live source/maintenance gate.
   package-dry-run  Build/unpack the package and run hex.publish --dry-run.
-  live             Run the two-request real TypeSafe example. Requires TYPESAFE_API_KEY.
+  live             Run comprehensive official live verification. Requires TYPESAFE_API_KEY.
+  live-alt         Run alternate TypeSafe-compatible endpoint verification.
+  live-matrix      Run official plus configured alternate live verification.
 
 This script never publishes, tags, commits, or pushes.
 TXT
@@ -41,8 +43,13 @@ case "${1:-}" in
     )
     ;;
   live)
-    test -n "${TYPESAFE_API_KEY:-}" || { echo "TYPESAFE_API_KEY is required" >&2; exit 1; }
-    mix run examples/live.exs
+    bash scripts/live_qc.sh official
+    ;;
+  live-alt)
+    bash scripts/live_qc.sh alternate
+    ;;
+  live-matrix)
+    bash scripts/live_qc.sh all
     ;;
   -h|--help|help|"") usage ;;
   *) usage >&2; exit 2 ;;

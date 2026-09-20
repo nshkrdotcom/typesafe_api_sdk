@@ -240,6 +240,34 @@ result = Task.await(task)
 
 ---
 
+## Live Verification
+
+The real-service matrix deliberately separates official TypeSafe credentials from
+alternate-deployment credentials:
+
+```bash
+export TYPESAFE_API_KEY='...'
+bash scripts/live_qc.sh official
+```
+
+The official matrix exercises both `/v1/models` and `/v1/systemone`, Noul, Choice,
+Score, tuple and bang APIs, explicit/default model selection, request metadata,
+and safe per-call controls. A separate opt-in alternate matrix verifies arbitrary
+TypeSafe-compatible API roots (including deployment path prefixes) with a
+credential issued for that exact root.
+
+```bash
+export TYPESAFE_LIVE_ALT_BASE_URL='https://provider.example/deployment/root'
+export TYPESAFE_LIVE_ALT_API_KEY='...'
+bash scripts/live_qc.sh alternate
+```
+
+See [`guides/live-verification.md`](guides/live-verification.md) for the complete
+coverage matrix, including which failure/control paths are tested deterministically
+rather than manufactured against a billable production service.
+
+---
+
 ## Development & Maintenance
 
 Clone the repository and fetch dependencies:
