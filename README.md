@@ -11,6 +11,12 @@
 
 # TypeSafe API SDK
 
+> **Building with System One semantics?** New application code should use
+> [`system_one_sdk`](https://github.com/nshkrdotcom/system_one_sdk), the
+> provider-neutral Elixir/BEAM SDK. `typesafe_api_sdk` is the TypeSafe-specific
+> API/provider SDK used by its built-in TypeSafe provider.
+>
+
 **Fast, reliable, and strongly typed Elixir client for TypeSafe AI's System One API.**
 
 Instead of writing fragile string prompts, wrestling with token limits, or parsing unstructured JSON out of an LLM, `typesafe_api_sdk` gives you direct, probabilistic machine intelligence over structured data:
