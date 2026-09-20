@@ -1,0 +1,47 @@
+name: Set up TypeSafeAPISDK maintenance environment
+description: Install BEAM and the pinned Pristine codegen source; runtime remains a normal dependency
+inputs:
+  elixir:
+    required: true
+    description: Elixir version
+  otp:
+    required: true
+    description: OTP version
+runs:
+  using: composite
+  steps:
+    - uses: erlef/setup-beam@v1
+      with:
+        elixir-version: ${{ inputs.elixir }}
+        otp-version: ${{ inputs.otp }}
+    - name: Check out pinned Pristine maintenance tools
+      uses: actions/checkout@v4
+      with:
+        repository: nshkrdotcom/pristine
+        ref: 04ba7b112413591f5cb9260f1d270bbbeb8a0630
+        path: .tooling/pristine
+        persist-credentials: false
+    - name: Select maintenance source
+      shell: bash
+      run: |
+        cat > "$RUNNER_TEMP/pristine_tools.exs" <<'ELIXIR'
+        defmodule MixWorkspaceOpsBootstrap do
+          def dep(committed, project_root) do
+            app = elem(committed, 0)
+            tooling = Path.join(System.fetch_env!("GITHUB_WORKSPACE"), ".tooling/pristine/apps")
+            source = if app == :pristine_codegen, do: Path.join(tooling, "pristine_codegen")
+            packaging? = Enum.any?(System.argv(), &(&1 in ["hex.build", "hex.publish"]))
+
+            if source && File.dir?(source) && not packaging? do
+              opts = if tuple_size(committed) == 3, do: elem(committed, 2), else: []
+              {app, Keyword.merge(opts, path: Path.relative_to(source, project_root, force: true), override: true)}
+            else
+              committed
+            end
+          end
+        end
+        ELIXIR
+        echo "MIX_WORKSPACE_OPS_BOOTSTRAP=$RUNNER_TEMP/pristine_tools.exs" >> "$GITHUB_ENV"
+        echo "TYPESAFE_API_SDK_MAINTENANCE=1" >> "$GITHUB_ENV"
+    - shell: bash
+      run: mix deps.get

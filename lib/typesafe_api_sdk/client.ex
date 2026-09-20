@@ -1,0 +1,356 @@
+defmodule TypeSafeAPISDK.Client do
+  @moduledoc """
+  Thin TypeSafe API client layered on Pristine.
+
+  Runtime code reads application configuration only. The included `runtime.exs`
+  maps the standard TypeSafe environment variables when this repository is the
+  top-level Mix project.
+  """
+
+  alias Pristine.Adapters.Auth.Bearer
+  alias Pristine.Client, as: RuntimeClient
+  alias Pristine.SDK.OpenAPI.Client, as: OpenAPIClient
+
+  alias TypeSafeAPISDK.{Constants, Error, ProviderProfile, RetryPolicy}
+
+  @protected_headers MapSet.new([
+                       "authorization",
+                       "accept",
+                       "content-type",
+                       "user-agent",
+                       "x-typesafe-sdk",
+                       "x-typesafe-runtime",
+                       "x-typesafe-retry-count"
+                     ])
+
+  @type t :: %__MODULE__{
+          api_key: String.t(),
+          base_url: String.t(),
+          default_model: String.t(),
+          timeout_ms: pos_integer(),
+          retry: RetryPolicy.t() | false,
+          headers: map(),
+          transport: module(),
+          transport_opts: keyword(),
+          context: Pristine.SDK.Context.t(),
+          pristine_client: RuntimeClient.t()
+        }
+
+  defstruct [
+    :api_key,
+    :base_url,
+    :default_model,
+    :timeout_ms,
+    :retry,
+    :headers,
+    :transport,
+    :transport_opts,
+    :context,
+    :pristine_client
+  ]
+
+  @spec new(keyword()) :: t()
+  def new(opts \\ []) when is_list(opts) do
+    api_key = resolve_required_string(opts, :api_key)
+    base_url = resolve_base_url(opts)
+    default_model = resolve_model(opts)
+    timeout_ms = resolve_timeout_ms(opts)
+    retry = resolve_retry(option_or_config(opts, :retry, %RetryPolicy{}))
+    headers = opts |> Keyword.get(:headers, %{}) |> normalize_headers() |> sanitize_extra_headers()
+    transport = Keyword.get(opts, :transport, config(:transport, Pristine.Adapters.Transport.Finch))
+    transport_opts = Keyword.get(opts, :transport_opts, config(:transport_opts, []))
+
+    client = %__MODULE__{
+      api_key: api_key,
+      base_url: base_url,
+      default_model: default_model,
+      timeout_ms: timeout_ms,
+      retry: retry,
+      headers: headers,
+      transport: transport,
+      transport_opts: transport_opts
+    }
+
+    context = build_context(client)
+    client = %{client | context: context, pristine_client: RuntimeClient.from_context(context)}
+
+    TypeSafeAPISDK.RuntimeCapabilities.require!(
+      client,
+      Keyword.get(opts, :runtime_requirements, [])
+    )
+
+    client
+  end
+
+  @spec pristine_client(t()) :: RuntimeClient.t()
+  def pristine_client(%__MODULE__{pristine_client: %RuntimeClient{} = client}), do: client
+
+  @doc false
+  @spec execute_generated_request(t(), map()) :: {:ok, term()} | {:error, term()}
+  def execute_generated_request(%__MODULE__{} = client, request) when is_map(request) do
+    call_opts = normalize_call_opts(Map.get(request, :opts, []))
+
+    extra_headers =
+      call_opts
+      |> Keyword.get(:extra_headers, %{})
+      |> normalize_headers()
+      |> sanitize_extra_headers()
+
+    request_spec =
+      request
+      |> OpenAPIClient.to_request_spec()
+      |> Map.update!(:headers, &Map.merge(normalize_headers(&1), extra_headers))
+      |> Map.put(:request_schema, nil)
+      |> Map.put(:response_schema, nil)
+
+    retry_policy = retry_override_policy(call_opts, client.retry)
+
+    execute_opts =
+      []
+      |> maybe_put(:timeout, timeout_override_ms(call_opts))
+      |> maybe_put(:cancellation, Keyword.get(call_opts, :cancellation))
+      |> Keyword.put(:retry_opts, RetryPolicy.to_pristine_opts(retry_policy))
+      |> Keyword.put(:typesafe_api_retry_policy, retry_policy)
+      |> Keyword.put(:response, :wrapped)
+
+    context = %{client.context | provider_profile: ProviderProfile.profile(retry_policy)}
+
+    case Pristine.execute_request(request_spec, context, execute_opts) do
+      {:error, %Pristine.Error{type: :cancelled} = cause} ->
+        {:error, Error.cancelled(cause)}
+
+      {:error, {:unsupported_transport_capabilities, _adapter, missing}} ->
+        {:error,
+         %Error{
+           type: :runtime_capability,
+           message: "Required transport capabilities are not supported",
+           details: %{missing: Map.keys(missing), statuses: missing}
+         }}
+
+      result ->
+        result
+    end
+  end
+
+  @spec extra_headers(keyword()) :: map()
+  def extra_headers(opts) when is_list(opts) do
+    case Keyword.get(opts, :retry_count, 0) do
+      count when is_integer(count) and count > 0 ->
+        %{"X-TypeSafe-Retry-Count" => Integer.to_string(count)}
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp build_context(%__MODULE__{} = client) do
+    Code.ensure_loaded!(TypeSafeAPISDK.TransportResponse)
+
+    Pristine.foundation_context(
+      auth: [Bearer.new(client.api_key)],
+      base_url: client.base_url,
+      default_timeout: client.timeout_ms,
+      headers: Map.merge(client.headers, system_headers()),
+      error_module: Error,
+      extra_headers: &__MODULE__.extra_headers/1,
+      log_level: config(:log_level, :warn),
+      package_version: TypeSafeAPISDK.version(),
+      provider_profile: ProviderProfile.profile(client.retry),
+      result_classifier: TypeSafeAPISDK.ResultClassifier,
+      response_wrapper: TypeSafeAPISDK.TransportResponse,
+      retry: [
+        adapter: Pristine.Adapters.Retry.Foundation,
+        opts: RetryPolicy.to_pristine_opts(client.retry)
+      ],
+      serializer: Pristine.Adapters.Serializer.JSON,
+      transport: client.transport,
+      transport_opts: client.transport_opts
+    )
+  end
+
+  defp system_headers do
+    version = TypeSafeAPISDK.version()
+    sdk = "typesafe-api-sdk/#{version}"
+
+    %{
+      "Accept" => "application/json",
+      "User-Agent" => sdk,
+      "X-TypeSafe-SDK" => sdk,
+      "X-TypeSafe-Runtime" => runtime_header()
+    }
+  end
+
+  defp runtime_header do
+    os = :os.type() |> Tuple.to_list() |> Enum.map_join("/", &to_string/1)
+    arch = :erlang.system_info(:system_architecture) |> to_string()
+    "elixir/#{System.version()} (#{os}; #{arch})"
+  end
+
+  defp resolve_required_string(opts, key) do
+    case option_or_config(opts, key, nil) do
+      value when is_binary(value) ->
+        case String.trim(value) do
+          "" ->
+            raise Error.configuration(
+                    "No API key was provided; pass :api_key or configure :typesafe_api_sdk, :api_key"
+                  )
+
+          trimmed ->
+            trimmed
+        end
+
+      _ ->
+        raise Error.configuration(
+                "No API key was provided; pass :api_key or configure :typesafe_api_sdk, :api_key"
+              )
+    end
+  end
+
+  defp resolve_base_url(opts) do
+    opts
+    |> option_or_config(:base_url, Constants.default_base_url())
+    |> validate_base_url!()
+  end
+
+  defp validate_base_url!(value) when is_binary(value) do
+    trimmed = String.trim(value)
+    uri = URI.parse(trimmed)
+
+    cond do
+      trimmed == "" -> invalid_base_url!("base_url must not be blank")
+      uri.scheme not in ["http", "https"] -> invalid_base_url!("base_url must use http or https")
+      is_nil(uri.host) or uri.host == "" -> invalid_base_url!("base_url must include a host")
+      not is_nil(uri.userinfo) -> invalid_base_url!("base_url must not contain URL credentials")
+      not is_nil(uri.query) -> invalid_base_url!("base_url must not contain a query string")
+      not is_nil(uri.fragment) -> invalid_base_url!("base_url must not contain a fragment")
+      true -> String.trim_trailing(trimmed, "/")
+    end
+  end
+
+  defp validate_base_url!(_value),
+    do: invalid_base_url!("base_url must be an http(s) URL string")
+
+  defp resolve_model(opts) do
+    configured = config(:model, config(:default_model, Constants.default_model()))
+
+    value =
+      case Keyword.fetch(opts, :model) do
+        {:ok, nil} -> configured
+        {:ok, explicit} -> explicit
+        :error -> configured
+      end
+
+    case value do
+      model when is_binary(model) ->
+        case String.trim(model) do
+          "" -> raise Error.configuration("model must not be blank")
+          trimmed -> trimmed
+        end
+
+      _ ->
+        raise Error.configuration("model must be a non-blank string")
+    end
+  end
+
+  defp invalid_base_url!(message), do: raise(Error.configuration(message))
+
+  defp resolve_timeout_ms(opts) do
+    cond do
+      non_nil_keyword?(opts, :timeout_ms) -> validate_timeout_ms!(Keyword.fetch!(opts, :timeout_ms))
+      non_nil_keyword?(opts, :timeout) -> opts |> Keyword.fetch!(:timeout) |> seconds_to_ms!()
+      true -> config(:timeout_ms, Constants.default_timeout_ms()) |> validate_timeout_ms!()
+    end
+  end
+
+  defp timeout_override_ms(opts) do
+    cond do
+      non_nil_keyword?(opts, :timeout_ms) -> validate_timeout_ms!(Keyword.fetch!(opts, :timeout_ms))
+      non_nil_keyword?(opts, :timeout) -> opts |> Keyword.fetch!(:timeout) |> seconds_to_ms!()
+      true -> nil
+    end
+  end
+
+  defp seconds_to_ms!(value) when is_number(value) and value > 0 do
+    if finite_number?(value), do: round(value * 1_000), else: invalid_timeout!()
+  end
+
+  defp seconds_to_ms!(_value), do: invalid_timeout!()
+  defp validate_timeout_ms!(value) when is_integer(value) and value > 0, do: value
+
+  defp validate_timeout_ms!(value) when is_float(value) and value > 0 do
+    if finite_number?(value),
+      do: round(value),
+      else: raise(Error.configuration("timeout_ms must be a positive finite number"))
+  end
+
+  defp validate_timeout_ms!(_),
+    do: raise(Error.configuration("timeout_ms must be a positive number"))
+
+  defp resolve_retry(nil), do: %RetryPolicy{}
+  defp resolve_retry(false), do: false
+  defp resolve_retry(%RetryPolicy{} = policy), do: policy
+  defp resolve_retry(opts) when is_list(opts) or is_map(opts), do: RetryPolicy.new!(opts)
+
+  defp resolve_retry(other),
+    do: raise(Error.configuration("invalid retry policy: #{inspect(other)}"))
+
+  defp retry_override_policy(opts, default) do
+    case Keyword.fetch(opts, :retry) do
+      :error -> default
+      {:ok, override} -> RetryPolicy.merge!(default, override)
+    end
+  end
+
+  defp normalize_call_opts(opts) when is_list(opts) do
+    if Keyword.keyword?(opts),
+      do: opts,
+      else: raise(ArgumentError, "request opts must be a keyword list")
+  end
+
+  defp normalize_call_opts(nil), do: []
+
+  defp normalize_call_opts(other) do
+    raise ArgumentError, "request opts must be a keyword list, got: #{inspect(other)}"
+  end
+
+  defp sanitize_extra_headers(headers) do
+    headers
+    |> Enum.reject(fn {key, _value} ->
+      MapSet.member?(@protected_headers, String.downcase(to_string(key)))
+    end)
+    |> Map.new()
+  end
+
+  defp normalize_headers(nil), do: %{}
+
+  defp normalize_headers(headers) when is_map(headers) do
+    Map.new(headers, fn {key, value} -> {to_string(key), to_string(value)} end)
+  end
+
+  defp normalize_headers(headers) when is_list(headers) do
+    Map.new(headers, fn {key, value} -> {to_string(key), to_string(value)} end)
+  end
+
+  defp normalize_headers(_), do: %{}
+
+  defp option_or_config(opts, key, fallback) do
+    case Keyword.fetch(opts, key) do
+      {:ok, nil} -> config(key, fallback)
+      {:ok, value} -> value
+      :error -> config(key, fallback)
+    end
+  end
+
+  defp non_nil_keyword?(opts, key),
+    do: Keyword.has_key?(opts, key) and not is_nil(Keyword.get(opts, key))
+
+  defp finite_number?(value) when is_integer(value), do: true
+  defp finite_number?(value) when is_float(value), do: abs(value) < 1.0e308
+
+  defp invalid_timeout!,
+    do: raise(Error.configuration("timeout must be a positive finite number of seconds"))
+
+  defp config(key, default), do: Application.get_env(:typesafe_api_sdk, key, default)
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+end

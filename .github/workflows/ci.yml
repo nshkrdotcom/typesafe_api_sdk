@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - elixir: '1.18.4'
+            otp: '27.3'
+          - elixir: '1.19.5'
+            otp: '28.3.1'
+          - elixir: '1.20.4'
+            otp: '29.0.6'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          elixir: ${{ matrix.elixir }}
+          otp: ${{ matrix.otp }}
+      - run: mix compile --warnings-as-errors
+      - run: mix test --warnings-as-errors
+
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          elixir: '1.19.5'
+          otp: '28.3.1'
+      - run: mix typesafe_api.prereq
+      - run: mix format --check-formatted
+      - run: mix compile --warnings-as-errors
+      - run: mix test --warnings-as-errors
+      - run: mix credo --strict
+      - run: mix dialyzer
+      - run: mix docs --warnings-as-errors
+      - run: mix typesafe_api.verify --project-root .
+      - run: mix hex.build --unpack
