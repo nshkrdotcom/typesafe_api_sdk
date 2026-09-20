@@ -84,9 +84,12 @@ defmodule TypeSafeAPISDK.MixProject do
       name: "typesafe_api_sdk",
       description: description(),
       files:
-        ~w(lib priv/upstream priv/generated guides examples README.md CHANGELOG.md LICENSE mix.exs assets),
+        ~w(lib priv/upstream priv/generated guides docs examples README.md CHANGELOG.md LICENSE mix.exs assets),
       licenses: ["MIT"],
-      links: %{"GitHub" => @source_url},
+      links: %{
+        "GitHub" => @source_url,
+        "Changelog" => "#{@source_url}/blob/main/CHANGELOG.md"
+      },
       maintainers: ["nshkrdotcom"]
     ]
   end
@@ -101,32 +104,80 @@ defmodule TypeSafeAPISDK.MixProject do
       assets: %{"assets" => "assets"},
       extras: [
         {"README.md", title: "Overview"},
+        {"guides/index.md", title: "Guide Index", filename: "guide-index"},
         {"guides/getting-started.md", title: "Getting Started"},
         {"guides/client-configuration.md", title: "Client Configuration"},
         {"guides/system-one-and-questions.md", title: "System One Wire API"},
         {"guides/models.md", title: "Models API"},
         {"guides/errors-and-retries.md", title: "Errors and Retries"},
         {"guides/runtime-controls.md", title: "Runtime Controls"},
-        {"guides/generation-and-verification.md", title: "Generation and Verification"},
         {"guides/extraction-boundary.md", title: "Extraction Boundary"},
+        {"guides/generation-and-verification.md", title: "Generation and Verification"},
+        {"docs/implementation/0.1.0/README.md",
+         title: "0.1.0 Implementation Architecture", filename: "implementation-0-1-0"},
         "CHANGELOG.md",
         {"LICENSE", title: "License", filename: "license"}
       ],
       groups_for_extras: [
-        "Start Here": ["README.md", "guides/getting-started.md"],
-        API: [
-          "guides/client-configuration.md",
+        "Start Here": [
+          "README.md",
+          "guides/index.md",
+          "guides/getting-started.md",
+          "guides/client-configuration.md"
+        ],
+        "Wire API": [
           "guides/system-one-and-questions.md",
           "guides/models.md",
           "guides/errors-and-retries.md",
           "guides/runtime-controls.md"
         ],
-        Maintenance: [
-          "guides/generation-and-verification.md",
+        Architecture: [
           "guides/extraction-boundary.md",
+          "guides/generation-and-verification.md",
+          "docs/implementation/0.1.0/README.md"
+        ],
+        Project: [
           "CHANGELOG.md",
           "LICENSE"
         ]
+      ],
+      groups_for_modules: [
+        "Client & Execution": [
+          TypeSafeAPISDK,
+          TypeSafeAPISDK.Client,
+          TypeSafeAPISDK.SystemOne,
+          TypeSafeAPISDK.Models
+        ],
+        "Wire Questions": [
+          TypeSafeAPISDK.Question,
+          TypeSafeAPISDK.Noul,
+          TypeSafeAPISDK.NoulCriteria,
+          TypeSafeAPISDK.Choice,
+          TypeSafeAPISDK.Score
+        ],
+        "Wire Responses": [
+          TypeSafeAPISDK.SystemOneResponse,
+          TypeSafeAPISDK.ListModelsResponse,
+          TypeSafeAPISDK.ModelMetadata,
+          TypeSafeAPISDK.NoulAnswer,
+          TypeSafeAPISDK.ChoiceAnswer,
+          TypeSafeAPISDK.ScoreAnswer,
+          TypeSafeAPISDK.Usage
+        ],
+        "Configuration & Errors": [
+          TypeSafeAPISDK.Error,
+          TypeSafeAPISDK.RetryPolicy,
+          TypeSafeAPISDK.Constants,
+          TypeSafeAPISDK.RuntimeCapabilities
+        ],
+        "Transport & Runtime": [
+          TypeSafeAPISDK.ProviderProfile,
+          TypeSafeAPISDK.ResultClassifier,
+          TypeSafeAPISDK.TransportError,
+          TypeSafeAPISDK.TransportResponse
+        ],
+        "Generated API": ~r/^TypeSafeAPISDK\.Generated\./,
+        "Maintenance Tasks": ~r/^Mix\.Tasks\.TypesafeApi\./
       ]
     ]
   end
